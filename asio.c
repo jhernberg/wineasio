@@ -868,18 +868,10 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetChannelInfo(LPWINEASIO iface, ASIOChannelI
     /* TRACE("(iface: %p, info: %p\n", iface, info); */
 
     if (info->channel < 0 || (info->isInput ? info->channel >= This->wineasio_number_inputs : info->channel >= This->wineasio_number_outputs))
-    {
-        TRACE("Invalid Parameter\n");
         return ASE_InvalidParameter;
-    }
 
     info->channelGroup = 0;
-
-#ifdef ASIOST32INT
-    info->type = ASIOSTInt32LSB;
-#else
     info->type = ASIOSTFloat32LSB;
-#endif
 
     if (info->isInput)
     {
