@@ -245,6 +245,7 @@ HIDDEN void __thiscall_OutputReady(void);
  */
 
 static inline int  jack_buffer_size_callback (jack_nframes_t nframes, void *arg);
+static inline void jack_latency_callback(jack_latency_callback_mode_t mode, void *arg);
 static inline int  jack_process_callback (jack_nframes_t nframes, void *arg);
 static inline int  jack_sample_rate_callback (jack_nframes_t nframes, void *arg);
 
@@ -467,6 +468,15 @@ HIDDEN ASIOBool STDMETHODCALLTYPE Init(LPWINEASIO iface, void *sysRef)
         ERR("Unable to register JACK buffer size change callback\n");
         return ASIOFalse;
     }
+    
+    if (jack_set_latency_callback(This->jack_client, jack_latency_callback, This))
+    {
+        jack_client_close(This->jack_client);
+        HeapFree(GetProcessHeap(), 0, This->input_channel);
+        ERR("Unable to register JACK latency callback\n");
+        return ASIOFalse;
+    }
+
 
     if (jack_set_process_callback(This->jack_client, jack_process_callback, This))
     {
@@ -1229,6 +1239,19 @@ static inline int jack_buffer_size_callback(jack_nframes_t nframes, void *arg)
     if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioResetRequest, 0 , 0))
         This->asio_callbacks->asioMessage(kAsioResetRequest, 0, 0, 0);
     return 0;
+}
+
+static inline void jack_latency_callback(jack_latency_callback_mode_t mode, void *arg)
+{
+    IWineASIOImpl   *This = (IWineASIOImpl*)arg;
+
+    if(This->asio_driver_state != Running)
+        return;
+
+    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioLatenciesChanged, 0 , 0))
+        This->asio_callbacks->asioMessage(kAsioLatenciesChanged, 0, 0, 0);
+
+    return;
 }
 
 static inline int jack_process_callback(jack_nframes_t nframes, void *arg)
