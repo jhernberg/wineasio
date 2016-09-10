@@ -940,18 +940,37 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
     TRACE("iface: %p, bufferInfo: %p, numChannels: %i, bufferSize: %i, asioCallbacks: %p\n", iface, bufferInfo, numChannels, bufferSize, asioCallbacks);
 
     if (This->asio_driver_state != Initialized)
-    {
-        WARN("Unable to create buffers, WineASIO is not in the initialized state\n");
         return ASE_NotPresent;
+
+    if (!bufferInfo && !asioCallbacks)
+            return ASE_InvalidMode;
+
+    /* Check for invalid channel numbers */
+    for (i = j = k = 0; i < numChannels; i++, buffer_info++)
+    {
+        if (buffer_info->isInput)
+        {
+            if (j++ >= This->wineasio_number_inputs)
+            {
+                WARN("Invalid input channel requested\n");
+                return ASE_InvalidMode;
+            }
+        }
+        else
+        {
+            if (k++  >= This->wineasio_number_outputs)
+            {
+                WARN("Invalid output channel requested\n");
+                return ASE_InvalidMode;
+            }
+        }
     }
 
+    /* set buf_size */
     if (This->wineasio_fixed_buffersize)
     {
         if (This->asio_current_buffersize != bufferSize)
-        {
-            WARN("Invalid buffersize (%i) requested\n", bufferSize);
             return ASE_InvalidMode;
-        }
         TRACE("Buffersize fixed at %i\n", This->asio_current_buffersize);
     }
     else
@@ -980,46 +999,36 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
         }
     }
 
+    /* print/discover ASIO host capabilities */
     This->asio_callbacks = asioCallbacks;
-    if (!This->asio_callbacks->asioMessage)
-    {
-        WARN("No asioMessage callback supplied\n");
-        return ASE_InvalidMode;
-    }
+    This->asio_time_info_mode = This->asio_can_time_code = FALSE;
 
-    TRACE("The ASIO host supports ASIO v%i\n", (int) This->asio_callbacks->asioMessage(kAsioEngineVersion,  0, 0, 0));
-
-    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioResetRequest, 0 , 0))
-        TRACE("The ASIO host supports kAsioResetRequest\n");
-
-    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioResyncRequest, 0 , 0))
-        TRACE("The ASIO host supports kAsioResyncRequest\n");
-
+    TRACE("The ASIO host supports ASIO v%i: ", This->asio_callbacks->asioMessage(kAsioEngineVersion, 0, 0, 0));
     if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioBufferSizeChange, 0 , 0))
-        TRACE("The ASIO host supports kAsioBufferSizeChange\n");
+        TRACE("kAsioBufferSizeChange ");
+    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioResetRequest, 0 , 0))
+        TRACE("kAsioResetRequest ");
+    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioResyncRequest, 0 , 0))
+        TRACE("kAsioResyncRequest ");
+    if (This->asio_callbacks->asioMessage(kAsioSelectorSupported, kAsioLatenciesChanged, 0 , 0))
+        TRACE("kAsioLatenciesChanged ");
 
-    /* Check for invalid channel numbers */
-    for (i = j = k = 0; i < numChannels; i++, buffer_info++)
+    if (This->asio_callbacks->asioMessage(kAsioSupportsTimeInfo, 0, 0, 0))
     {
-        if (buffer_info->isInput)
+        TRACE("bufferSwitchTimeInfo ");
+        This->asio_time_info_mode = TRUE;
+        if (This->asio_callbacks->asioMessage(kAsioSupportsTimeCode,  0, 0, 0))
         {
-            if (j++ >= This->wineasio_number_inputs)
-            {
-                WARN("Invalid input channel requested\n");
-                return ASE_InvalidMode;
-            }
-        }
-        else
-        {
-            if (k++  >= This->wineasio_number_outputs)
-            {
-                WARN("Invalid output channel requested\n");
-                return ASE_InvalidMode;
-            }
+            TRACE("TimeCode");
+            This->asio_can_time_code = TRUE;
         }
     }
+    else
+        TRACE("BufferSwitch");
+    TRACE("\n");
 
     /* Allocate audio buffers */
+
     This->callback_audio_buffer = HeapAlloc(GetProcessHeap(), 0,
         (This->wineasio_number_inputs + This->wineasio_number_outputs) * 2 * This->asio_current_buffersize * sizeof(jack_default_audio_sample_t));
     if (!This->callback_audio_buffer)
@@ -1035,7 +1044,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
     for (i = 0; i < This->wineasio_number_outputs; i++)
         This->output_channel[i].audio_buffer = This->callback_audio_buffer + ((This->wineasio_number_inputs + i) * 2 * This->asio_current_buffersize);
 
-     /* initialize ASIOBufferInfo structures */
+    /* initialize ASIOBufferInfo structures */
     buffer_info = bufferInfo;
     This->asio_active_inputs = This->asio_active_outputs = 0;
     for (i = 0; i < numChannels; i++, buffer_info++)
@@ -1058,16 +1067,6 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
         }
     }
     TRACE("%i audio channels initialized\n", This->asio_active_inputs + This->asio_active_outputs);
-
-    /* check for TimeInfo or TimeCode mode */
-    if (This->asio_callbacks->asioMessage(kAsioSupportsTimeInfo, 0, 0, 0))
-    {
-        This->asio_time_info_mode = TRUE;
-        if (This->asio_callbacks->asioMessage(kAsioSupportsTimeCode,  0, 0, 0))
-            This->asio_can_time_code = TRUE;
-    }
-    else
-        This->asio_time_info_mode = FALSE;
 
     This->asio_driver_state = Prepared;
     return ASE_OK;
