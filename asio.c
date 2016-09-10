@@ -410,36 +410,19 @@ HIDDEN ASIOBool STDMETHODCALLTYPE Init(LPWINEASIO iface, void *sysRef)
     jack_options_t  jack_options = JackNullOption;
     int             i;
 
-    TRACE("iface: %p, sysRef: %p\n", iface, sysRef);
-
     This->sys_ref = sysRef;
-
     mlockall(MCL_FUTURE);
     configure_driver(This);
 
-    if (!This->wineasio_autostart_server)
-        jack_options |= JackNoStartServer;
-
-    This->jack_client = jack_client_open(This->jack_client_name, jack_options, &jack_status);
-
-    if (This->jack_client == NULL)
+    if (!(This->jack_client = jack_client_open(This->jack_client_name, jack_options, &jack_status)))
     {
         WARN("Unable to open a JACK client as: %s\n", This->jack_client_name);
         return ASIOFalse;
     }
     TRACE("JACK client opened as: '%s'\n", jack_get_client_name(This->jack_client));
 
-    if (!(This->asio_sample_rate = jack_get_sample_rate(This->jack_client)))
-    {
-        WARN("Unable to get samplerate from JACK\n");
-        return ASIOFalse;
-    }
-
-    if (!(This->asio_current_buffersize = jack_get_buffer_size(This->jack_client)))
-    {
-        WARN("Unable to get buffer size from JACK\n");
-        return ASIOFalse;
-    }
+    This->asio_sample_rate = jack_get_sample_rate(This->jack_client);
+    This->asio_current_buffersize = jack_get_buffer_size(This->jack_client);
 
     /* Allocate IOChannel structures */
     This->input_channel = HeapAlloc(GetProcessHeap(), 0, (This->wineasio_number_inputs + This->wineasio_number_outputs) * sizeof(IOChannel));
