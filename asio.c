@@ -26,9 +26,12 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <jack/jack.h>
+#include <jack/thread.h>
 
 #include "wine/debug.h"
 #include "objbase.h"
@@ -36,11 +39,10 @@
 #include "winreg.h"
 #include "wine/unicode.h"
 
-#include <jack/jack.h>
-#include <jack/thread.h>
-
 #define IEEE754_64FLOAT 1
+#undef NATIVE_INT64
 #include "asio.h"
+#define NATIVE_INT64
 
 WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
@@ -171,7 +173,7 @@ typedef struct IWineASIOImpl
     const char                  **jack_input_ports;
     const char                  **jack_output_ports;
 
-    /* process callback buffers */
+    /* jack process callback buffers */
     jack_default_audio_sample_t *callback_audio_buffer;
     IOChannel                   *input_channel;
     IOChannel                   *output_channel;
@@ -242,9 +244,9 @@ HIDDEN void __thiscall_OutputReady(void);
  *  Jack callbacks
  */
 
-static int  bufsize_callback (jack_nframes_t nframes, void *arg);
-static int  process_callback (jack_nframes_t nframes, void *arg);
-static int  srate_callback (jack_nframes_t nframes, void *arg);
+static inline int  jack_buffer_size_callback (jack_nframes_t nframes, void *arg);
+static inline int  jack_process_callback (jack_nframes_t nframes, void *arg);
+static inline int  jack_sample_rate_callback (jack_nframes_t nframes, void *arg);
 
 /*
  *  Support functions
@@ -458,7 +460,15 @@ HIDDEN ASIOBool STDMETHODCALLTYPE Init(LPWINEASIO iface, void *sysRef)
 
     jack_set_thread_creator(jack_thread_creator);
 
-    if (jack_set_process_callback(This->jack_client, process_callback, This))
+    if (jack_set_buffer_size_callback(This->jack_client, jack_buffer_size_callback, This))
+    {
+        jack_client_close(This->jack_client);
+        HeapFree(GetProcessHeap(), 0, This->input_channel);
+        ERR("Unable to register JACK buffer size change callback\n");
+        return ASIOFalse;
+    }
+
+    if (jack_set_process_callback(This->jack_client, jack_process_callback, This))
     {
         jack_client_close(This->jack_client);
         HeapFree(GetProcessHeap(), 0, This->input_channel);
@@ -466,19 +476,11 @@ HIDDEN ASIOBool STDMETHODCALLTYPE Init(LPWINEASIO iface, void *sysRef)
         return ASIOFalse;
     }
 
-    if (jack_set_buffer_size_callback(This->jack_client, bufsize_callback, This))
+    if (jack_set_sample_rate_callback (This->jack_client, jack_sample_rate_callback, This))
     {
         jack_client_close(This->jack_client);
         HeapFree(GetProcessHeap(), 0, This->input_channel);
-        ERR("Unable to register JACK buffersize change callback\n");
-        return ASIOFalse;
-    }
-
-    if (jack_set_sample_rate_callback (This->jack_client, srate_callback, This))
-    {
-        jack_client_close(This->jack_client);
-        HeapFree(GetProcessHeap(), 0, This->input_channel);
-        ERR("Unable to register JACK samplerate change callback\n");
+        ERR("Unable to register JACK sample rate change callback\n");
         return ASIOFalse;
     }
 
@@ -539,10 +541,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE Start(LPWINEASIO iface)
 {
     IWineASIOImpl   *This = (IWineASIOImpl*)iface;
     int             i;
-
-#ifndef _WIN64
-    DWORD           temp_time;
-#endif
+    DWORD           time;
 
     TRACE("iface: %p\n", iface);
 
@@ -556,63 +555,38 @@ HIDDEN ASIOError STDMETHODCALLTYPE Start(LPWINEASIO iface)
     for (i = 0; i < (This->wineasio_number_inputs + This->wineasio_number_outputs) * 2 * This->asio_current_buffersize; i++)
         This->callback_audio_buffer[i] = 0;
 
-    /* prime the callback */
+    /* prime the callback by preprocessing one outbound ASIO bufffer */
     This->asio_buffer_index =  0;
-    if (This->asio_callbacks)
-    {
-#ifdef _WIN64
-        This->asio_sample_position = 0;
-        This->asio_time_stamp = timeGetTime() * 1000000;
-#else
-        This->asio_sample_position.hi = This->asio_sample_position.lo = 0;
-        temp_time = timeGetTime();
-        This->asio_time_stamp.lo = temp_time * 1000000;
-        This->asio_time_stamp.hi = ((unsigned long long) temp_time * 1000000) >> 32;
-#endif
-        This->asio_time_info_mode = FALSE;
-        This->asio_can_time_code = FALSE;
+    This->asio_sample_position.hi = This->asio_sample_position.lo = 0;
 
-        if (This->asio_callbacks->asioMessage(kAsioSupportsTimeInfo, 0, 0, 0))
-        {
-            TRACE("TimeInfo mode enabled\n");
-            This->asio_time_info_mode = TRUE;
-#ifdef _WIN64
-            This->asio_time.timeInfo.systemTime = This->asio_time_stamp;
-            This->asio_time.timeInfo.samplePosition = 0;
-#else
-            This->asio_time.timeInfo.systemTime.hi = This->asio_time_stamp.hi;
-            This->asio_time.timeInfo.systemTime.lo = This->asio_time_stamp.lo;
-            This->asio_time.timeInfo.samplePosition.hi = This->asio_time.timeInfo.samplePosition.lo = 0;
-#endif
-            This->asio_time.timeCode.speed = 0;
-            This->asio_time.timeInfo.sampleRate = This->asio_sample_rate;
-            This->asio_time.timeInfo.flags = kSystemTimeValid | kSamplePositionValid | kSampleRateValid;
-            if (This->asio_callbacks->asioMessage(kAsioSupportsTimeCode,  0, 0, 0))
-            {
-                TRACE("TimeCode supported\n");
-                This->asio_can_time_code = TRUE;
-#ifdef _WIN64
-                This->asio_time.timeCode.timeCodeSamples = This->asio_time_stamp;
-#else
-                This->asio_time.timeCode.timeCodeSamples.hi = This->asio_time_stamp.hi;
-                This->asio_time.timeCode.timeCodeSamples.lo = This->asio_time_stamp.lo;
-#endif
-                This->asio_time.timeCode.flags = ~(kTcValid | kTcRunning);
-            }
-            This->asio_callbacks->bufferSwitchTimeInfo(&This->asio_time, This->asio_buffer_index, ASIOTrue);
-        }
-        else
-        {
-            TRACE("Runnning simple BufferSwitch() callback\n");
-            This->asio_callbacks->bufferSwitch(This->asio_buffer_index, ASIOTrue);
-        }
-        This->asio_buffer_index = This->asio_buffer_index ? 0 : 1;
-    }
-    else
+    time = timeGetTime();
+    This->asio_time_stamp.lo = time * 1000000;
+    This->asio_time_stamp.hi = ((unsigned long long) time * 1000000) >> 32;
+
+    if (This->asio_time_info_mode) /* use the newer bufferSwitchTimeInfo method if supported */
     {
-        WARN("The ASIO host supplied no callback structure\n");
-        return ASE_NotPresent;
+        This->asio_time.timeInfo.samplePosition.lo = This->asio_time.timeInfo.samplePosition.hi = 0;
+        This->asio_time.timeInfo.systemTime.lo = This->asio_time_stamp.lo;
+        This->asio_time.timeInfo.systemTime.hi = This->asio_time_stamp.hi;
+        This->asio_time.timeInfo.sampleRate = This->asio_sample_rate;
+        This->asio_time.timeInfo.flags = kSystemTimeValid | kSamplePositionValid | kSampleRateValid;
+
+        if (This->asio_can_time_code) /* addionally use time code if supported */
+        {
+            This->asio_time.timeCode.speed = 1; /* FIXME */
+            This->asio_time.timeCode.timeCodeSamples.lo = This->asio_time_stamp.lo;
+            This->asio_time.timeCode.timeCodeSamples.hi = This->asio_time_stamp.hi;
+            This->asio_time.timeCode.flags = ~(kTcValid | kTcRunning);
+        }
+        This->asio_callbacks->bufferSwitchTimeInfo(&This->asio_time, This->asio_buffer_index, ASIOTrue);
+    } 
+    else
+    { /* use the old bufferSwitch method */
+        This->asio_callbacks->bufferSwitch(This->asio_buffer_index, ASIOTrue);
     }
+
+    /* swith asio buffer */
+    This->asio_buffer_index = This->asio_buffer_index ? 0 : 1;
 
     if (jack_activate(This->jack_client))
     {
@@ -1264,7 +1238,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE OutputReady(LPWINEASIO iface)
  *  JACK callbacks
  */
 
-static int bufsize_callback(jack_nframes_t nframes, void *arg)
+static inline int jack_buffer_size_callback(jack_nframes_t nframes, void *arg)
 {
     IWineASIOImpl   *This = (IWineASIOImpl*)arg;
 
@@ -1276,80 +1250,50 @@ static int bufsize_callback(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-static int process_callback(jack_nframes_t nframes, void *arg)
+static inline int jack_process_callback(jack_nframes_t nframes, void *arg)
 {
     IWineASIOImpl               *This = (IWineASIOImpl*)arg;
+
     int                         i;
     jack_transport_state_t      jack_transport_state;
     jack_position_t             jack_position;
- 
-#ifdef ASIOST32INT
-    jack_default_audio_sample_t *in, *out;
-    jack_nframes_t              j;
-#endif
+    DWORD                       time;
 
-#ifndef _WIN64
-    DWORD                       temp_time;
-#endif
-    // Output silence if the ASIO callback isn't running yet
+    /* output silence if the ASIO callback isn't running yet */
     if (This->asio_driver_state != Running)
     {
         for (i = 0; i < This->asio_active_outputs; i++)
-            memset(jack_port_get_buffer(This->output_channel[i].port, nframes), 0, sizeof (jack_default_audio_sample_t) * nframes);
+            bzero(jack_port_get_buffer(This->output_channel[i].port, nframes), sizeof (jack_default_audio_sample_t) * nframes);
         return 0;
     }
-    /* get the input data from JACK and copy it to the ASIO buffers */
-#ifdef ASIOST32INT
-    for (i = 0; i < This->asio_active_inputs; i++)
-        if (This->input_channel[i].active == ASIOTrue)
-        {
-            in = jack_port_get_buffer(This->input_channel[i].port, nframes);
-            for (j = 0; j < nframes; j++)
-                ((int *)This->input_channel[i].audio_buffer)[nframes * This->asio_buffer_index + j] = in[j] * 0x7fffffff;
-        }
-#else
+
+    /* copy jack to asio buffers */
     for (i = 0; i < This->asio_active_inputs; i++)
         if (This->input_channel[i].active == ASIOTrue)
             memcpy (&This->input_channel[i].audio_buffer[nframes * This->asio_buffer_index],
                     jack_port_get_buffer(This->input_channel[i].port, nframes),
                     sizeof (jack_default_audio_sample_t) * nframes);
-#endif
 
-#ifdef _WIN64
-    This->asio_sample_position += nframes;
-    This->asio_sample_position &= 0xffffffff;   /* make 32bit since JACK's position is 32bit anyways */
-    This->asio_time_stamp = timeGetTime() * 1000000;
-#else
+    if (This->asio_sample_position.lo > ULONG_MAX - nframes)
+        This->asio_sample_position.hi++;
     This->asio_sample_position.lo += nframes;
-    temp_time = timeGetTime();
-    This->asio_time_stamp.lo = temp_time * 1000000;
-    This->asio_time_stamp.hi = ((unsigned long long) temp_time * 1000000) >> 32;
-#endif
 
-    /* time info & time code */
-    if (This->asio_time_info_mode)
+    time = timeGetTime();
+    This->asio_time_stamp.lo = time * 1000000;
+    This->asio_time_stamp.hi = ((unsigned long long) time * 1000000) >> 32;
+
+    if (This->asio_time_info_mode) /* use the newer bufferSwitchTimeInfo method if supported */
     {
-#ifdef _WIN64
-        This->asio_time.timeInfo.samplePosition = This->asio_sample_position;
-        This->asio_time.timeInfo.systemTime = This->asio_time_stamp;
-#else
         This->asio_time.timeInfo.samplePosition.lo = This->asio_sample_position.lo;
-        This->asio_time.timeInfo.samplePosition.hi = 0;
+        This->asio_time.timeInfo.samplePosition.hi = This->asio_sample_position.hi;
         This->asio_time.timeInfo.systemTime.lo = This->asio_time_stamp.lo;
         This->asio_time.timeInfo.systemTime.hi = This->asio_time_stamp.hi;
-#endif
         This->asio_time.timeInfo.sampleRate = This->asio_sample_rate;
-        This->asio_time.timeInfo.flags  = kSystemTimeValid | kSamplePositionValid | kSampleRateValid;
+        This->asio_time.timeInfo.flags = kSystemTimeValid | kSamplePositionValid | kSampleRateValid;
 
-        if (This->asio_can_time_code)
+        if (This->asio_can_time_code) /* FIXME addionally use time code if supported */
         {
             jack_transport_state = jack_transport_query(This->jack_client, &jack_position);
-#ifdef _WIN64
-            This->asio_time.timeCode.timeCodeSamples = jack_position.frame;
-#else
-            This->asio_time.timeCode.timeCodeSamples.lo = jack_position.frame;
-            This->asio_time.timeCode.timeCodeSamples.hi = 0;
-#endif
             This->asio_time.timeCode.flags = kTcValid;
             if (jack_transport_state == JackTransportRolling)
                 This->asio_time.timeCode.flags |= kTcRunning;
@@ -1357,29 +1301,23 @@ static int process_callback(jack_nframes_t nframes, void *arg)
         This->asio_callbacks->bufferSwitchTimeInfo(&This->asio_time, This->asio_buffer_index, ASIOTrue);
     }
     else
+    { /* use the old bufferSwitch method */
         This->asio_callbacks->bufferSwitch(This->asio_buffer_index, ASIOTrue);
+    }
 
-    /* copy the ASIO data to JACK */
-#ifdef ASIOST32INT
-    for (i = 0; i < This->asio_active_outputs; i++)
-        if (This->output_channel[i].active == ASIOTrue)
-        {
-            out = jack_port_get_buffer(This->output_channel[i].port, nframes);
-            for (j = 0; j < nframes; j++)
-                out[j] = ((int *) This->output_channel[i].audio_buffer)[nframes * This->asio_buffer_index + j] / (float) 0x7fffffff;
-        }
-#else
+    /* copy asio to jack buffers */
     for (i = 0; i < This->asio_active_outputs; i++)
         if (This->output_channel[i].active == ASIOTrue)
             memcpy(jack_port_get_buffer(This->output_channel[i].port, nframes),
                     &This->output_channel[i].audio_buffer[nframes * This->asio_buffer_index],
                     sizeof (jack_default_audio_sample_t) * nframes);
-#endif
+
+    /* swith asio buffer */
     This->asio_buffer_index = This->asio_buffer_index ? 0 : 1;
     return 0;
 }
 
-static int srate_callback(jack_nframes_t nframes, void *arg)
+static inline int jack_sample_rate_callback(jack_nframes_t nframes, void *arg)
 {
     IWineASIOImpl   *This = (IWineASIOImpl*)arg;
 
