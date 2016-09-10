@@ -361,30 +361,22 @@ HIDDEN ULONG STDMETHODCALLTYPE Release(LPWINEASIO iface)
         /* just for good measure we deinitialize IOChannel structures and unregister JACK ports */
         for (i = 0; i < This->wineasio_number_inputs; i++)
         {
-            if(jack_port_unregister (This->jack_client, This->input_channel[i].port))
-                MESSAGE("Error trying to unregister port %s\n", This->input_channel[i].port_name);
+            jack_port_unregister (This->jack_client, This->input_channel[i].port);
             This->input_channel[i].active = ASIOFalse;
             This->input_channel[i].port = NULL;
         }
         for (i = 0; i < This->wineasio_number_outputs; i++)
         {
-            if(jack_port_unregister (This->jack_client, This->output_channel[i].port))
-                MESSAGE("Error trying to unregister port %s\n", This->output_channel[i].port_name);
+            jack_port_unregister (This->jack_client, This->output_channel[i].port);
             This->output_channel[i].active = ASIOFalse;
             This->output_channel[i].port = NULL;
         }
         This->asio_active_inputs = This->asio_active_outputs = 0;
         TRACE("%i IOChannel structures released\n", This->wineasio_number_inputs + This->wineasio_number_outputs);
 
-        if (This->jack_output_ports)
-            jack_free (This->jack_output_ports);
-        if (This->jack_input_ports)
-            jack_free (This->jack_input_ports);
-
-        if (This->jack_client)
-            if (jack_client_close(This->jack_client))
-                MESSAGE("Error trying to close JACK client\n");
-
+        jack_free (This->jack_output_ports);
+        jack_free (This->jack_input_ports);
+        jack_client_close(This->jack_client);
         if (This->input_channel)
             HeapFree(GetProcessHeap(), 0, This->input_channel);
     }
