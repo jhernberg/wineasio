@@ -588,31 +588,6 @@ HIDDEN ASIOError STDMETHODCALLTYPE Start(LPWINEASIO iface)
     /* swith asio buffer */
     This->asio_buffer_index = This->asio_buffer_index ? 0 : 1;
 
-    if (jack_activate(This->jack_client))
-    {
-        ERR("Unable to activate JACK client\n");
-        return ASE_NotPresent;
-    }
-
-    /* connect to the hardware io */
-    if (This->wineasio_connect_to_hardware)
-    {
-        for (i = 0; i < This->jack_num_input_ports && i < This->wineasio_number_inputs; i++)
-        {
-            /* TRACE("Connecting JACK port: %s to asio: %s\n", This->jack_input_ports[i], jack_port_name(This->input_channel[i].port)); */
-            if (strstr(jack_port_type(jack_port_by_name(This->jack_client, This->jack_input_ports[i])), "audio"))
-                if (jack_connect(This->jack_client, This->jack_input_ports[i], jack_port_name(This->input_channel[i].port)))
-                    WARN("Unable to connect %s to %s\n", This->jack_input_ports[i], jack_port_name(This->input_channel[i].port));
-        }
-        for (i = 0; i < This->jack_num_output_ports && i < This->wineasio_number_outputs; i++)
-        {
-            /* TRACE("Connecting asio: %s to jack port: %s\n", jack_port_name(This->output_channel[i].port), This->jack_output_ports[i]); */
-            if (strstr(jack_port_type(jack_port_by_name(This->jack_client, This->jack_output_ports[i])), "audio"))
-                if (jack_connect(This->jack_client, jack_port_name(This->output_channel[i].port), This->jack_output_ports[i]))
-                    WARN("Unable to connect to %s\n", jack_port_name(This->output_channel[i].port));
-        }
-    }
-
     This->asio_driver_state = Running;
     TRACE("WineASIO successfully loaded\n");
     return ASE_OK;
@@ -633,18 +608,10 @@ HIDDEN ASIOError STDMETHODCALLTYPE Stop(LPWINEASIO iface)
     TRACE("iface: %p\n", iface);
 
     if (This->asio_driver_state != Running)
-    {
-        WARN("Unable to stop WineASIO, not running\n");
         return ASE_NotPresent;
-    }
 
     This->asio_driver_state = Prepared;
 
-    if (jack_deactivate(This->jack_client))
-    {
-        ERR("Unable to deactivate JACK client\n");
-        return ASE_NotPresent;
-    }
     return ASE_OK;
 }
 
@@ -1068,6 +1035,21 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
     }
     TRACE("%i audio channels initialized\n", This->asio_active_inputs + This->asio_active_outputs);
 
+    if (jack_activate(This->jack_client))
+        return ASE_NotPresent;
+
+    /* connect to the hardware io */
+    if (This->wineasio_connect_to_hardware)
+    {
+        for (i = 0; i < This->jack_num_input_ports && i < This->wineasio_number_inputs; i++)
+            if (strstr(jack_port_type(jack_port_by_name(This->jack_client, This->jack_input_ports[i])), "audio"))
+                jack_connect(This->jack_client, This->jack_input_ports[i], jack_port_name(This->input_channel[i].port));
+        for (i = 0; i < This->jack_num_output_ports && i < This->wineasio_number_outputs; i++)
+            if (strstr(jack_port_type(jack_port_by_name(This->jack_client, This->jack_output_ports[i])), "audio"))
+                jack_connect(This->jack_client, jack_port_name(This->output_channel[i].port), This->jack_output_ports[i]);
+    }
+
+    /* at this point all the connections are made and the jack process callback is outputting silence */
     This->asio_driver_state = Prepared;
     return ASE_OK;
 }
@@ -1091,10 +1073,10 @@ HIDDEN ASIOError STDMETHODCALLTYPE DisposeBuffers(LPWINEASIO iface)
     if (This->asio_driver_state == Running)
         Stop (iface);
     if (This->asio_driver_state != Prepared)
-    {
-        WARN("Unable to dispose buffers, wrong driver state\n");
         return ASE_NotPresent;
-    }
+
+    if (jack_deactivate(This->jack_client))
+        return ASE_NotPresent;
 
     This->asio_callbacks = NULL;
 
