@@ -838,19 +838,13 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetSamplePosition(LPWINEASIO iface, ASIOSampl
     TRACE("iface: %p, sPos: %p, tStamp: %p\n", iface, sPos, tStamp);
 
     if (!sPos && !tStamp)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
-#ifdef _WIN64
-    *tStamp = This->asio_time_stamp;
-    *sPos = This->asio_sample_position;
-#else
+
     tStamp->lo = This->asio_time_stamp.lo;
     tStamp->hi = This->asio_time_stamp.hi;
     sPos->lo = This->asio_sample_position.lo;
-    sPos->hi = 0;
-#endif
+    sPos->hi = 0; /* FIXME */
+
     return ASE_OK;
 }
 
