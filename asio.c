@@ -556,10 +556,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE Start(LPWINEASIO iface)
     TRACE("iface: %p\n", iface);
 
     if (This->asio_driver_state != Prepared)
-    {
-        ERR("Unable to start WineASIO\n");
         return ASE_NotPresent;
-    }
 
     /* Zero the audio buffer */
     for (i = 0; i < (This->wineasio_number_inputs + This->wineasio_number_outputs) * 2 * This->asio_current_buffersize; i++)
@@ -638,10 +635,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetChannels (LPWINEASIO iface, LONG *numInput
     IWineASIOImpl   *This = (IWineASIOImpl*)iface;
 
     if (!numInputChannels && !numOutputChannels)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
 
     *numInputChannels = This->wineasio_number_inputs;
     *numOutputChannels = This->wineasio_number_outputs;
@@ -691,10 +685,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetBufferSize(LPWINEASIO iface, LONG *minSize
     TRACE("iface: %p, minSize: %p, maxSize: %p, preferredSize: %p, granularity: %p\n", iface, minSize, maxSize, preferredSize, granularity);
 
     if (!minSize && !maxSize && !preferredSize && !granularity)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
 
     if (This->wineasio_fixed_buffersize)
     {
@@ -746,10 +737,8 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetSampleRate(LPWINEASIO iface, ASIOSampleRat
     TRACE("iface: %p, Sample rate is %i\n", iface, (int) This->asio_sample_rate);
 
     if (!sampleRate)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
+
     *sampleRate = This->asio_sample_rate;
     return ASE_OK;
 }
@@ -789,10 +778,8 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetClockSources(LPWINEASIO iface, ASIOClockSo
     TRACE("iface: %p, clocks: %p, numSources: %p\n", iface, clocks, numSources);
 
     if (!clocks && !numSources)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
+
     clocks->index = 0;
     clocks->associatedChannel = -1;
     clocks->associatedGroup = -1;
