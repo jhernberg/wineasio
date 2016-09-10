@@ -251,7 +251,7 @@ static int  srate_callback (jack_nframes_t nframes, void *arg);
  */
 
 HRESULT WINAPI  WineASIOCreateInstance(REFIID riid, LPVOID *ppobj);
-static  BOOL    configure_driver(IWineASIOImpl *This);
+static  VOID    configure_driver(IWineASIOImpl *This);
 
 static DWORD WINAPI jack_thread_creator_helper(LPVOID arg);
 static int          jack_thread_creator(pthread_t* thread_id, const pthread_attr_t* attr, void *(*function)(void*), void* arg);
@@ -415,15 +415,11 @@ HIDDEN ASIOBool STDMETHODCALLTYPE Init(LPWINEASIO iface, void *sysRef)
     This->sys_ref = sysRef;
 
     mlockall(MCL_FUTURE);
-
-    if (!configure_driver(This))
-    {
-        WARN("Unable to configure WineASIO\n");
-        return ASIOFalse;
-    }
+    configure_driver(This);
 
     if (!This->wineasio_autostart_server)
         jack_options |= JackNoStartServer;
+
     This->jack_client = jack_client_open(This->jack_client_name, jack_options, &jack_status);
 
     if (This->jack_client == NULL)
@@ -1311,7 +1307,7 @@ static int process_callback(jack_nframes_t nframes, void *arg)
     int                         i;
     jack_transport_state_t      jack_transport_state;
     jack_position_t             jack_position;
-
+ 
 #ifdef ASIOST32INT
     jack_default_audio_sample_t *in, *out;
     jack_nframes_t              j;
@@ -1450,7 +1446,7 @@ static DWORD WINAPI jack_thread_creator_helper(LPVOID arg)
     return 0;
 }
 
-static BOOL configure_driver(IWineASIOImpl *This)
+static VOID configure_driver(IWineASIOImpl *This)
 {
     HKEY    hkey;
     LONG    result, value;
@@ -1508,11 +1504,6 @@ static BOOL configure_driver(IWineASIOImpl *This)
 
     /* create registry entries with defaults if not present */
     result = RegCreateKeyExW(HKEY_CURRENT_USER, key_software_wine_wineasio, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL);
-    if (result != ERROR_SUCCESS)
-    {
-        ERR("Unable to open registry\n");
-        return FALSE;
-    }
 
     /* get/set number of asio inputs */
     size = sizeof(DWORD);
@@ -1675,7 +1666,7 @@ static BOOL configure_driver(IWineASIOImpl *This)
             && This->wineasio_preferred_buffersize <= ASIO_MAXIMUM_BUFFERSIZE))
         This->wineasio_preferred_buffersize = ASIO_PREFERRED_BUFFERSIZE;
 
-    return TRUE;
+    return;
 }
 
 /* Allocate the interface pointer and associate it with the vtbl/WineASIO object */
