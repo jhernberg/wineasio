@@ -736,16 +736,21 @@ HIDDEN ASIOError STDMETHODCALLTYPE GetChannels (LPWINEASIO iface, LONG *numInput
 DEFINE_THISCALL_WRAPPER(GetLatencies,12)
 HIDDEN ASIOError STDMETHODCALLTYPE GetLatencies(LPWINEASIO iface, LONG *inputLatency, LONG *outputLatency)
 {
-    IWineASIOImpl   *This = (IWineASIOImpl*)iface;
-
+    IWineASIOImpl           *This = (IWineASIOImpl*)iface;
+    jack_latency_range_t    range;
+    
     if (!inputLatency && !outputLatency)
-    {
-        WARN("Nullpointer argument\n");
         return ASE_InvalidParameter;
-    }
 
-    *inputLatency = *outputLatency = This->asio_current_buffersize;
-    TRACE("iface: %p Latency = %i frames\n", iface, This->asio_current_buffersize);
+    if (This->asio_driver_state == Loaded)
+        return ASE_NotPresent;
+
+    jack_port_get_latency_range(This->input_channel[0].port, JackCaptureLatency, &range);
+    *inputLatency = range.max;
+    jack_port_get_latency_range(This->output_channel[0].port, JackPlaybackLatency, &range);
+    *outputLatency = range.max;
+    TRACE("iface: %p, input latency: %d, output latency: %d\n", iface, *inputLatency, *outputLatency);
+
     return ASE_OK;
 }
 
