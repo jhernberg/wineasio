@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 ed -s asio.h <<< $'g/unsigned long/s//ULONG/g\nw\nq'
 ed -s asio.h <<< $'g/long long int/s//LONGLONG/g\nw\nq'
 ed -s asio.h <<< $'g/long int/s//LONG/g\nw\nq'
