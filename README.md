@@ -58,7 +58,7 @@ will register the 32 bit driver in a 64 bit prefix, use the following command
 to register the 64 bit driver in a 64 bit wineprefix:
 
 ```sh
-wine64 regsvr32 wineaiso.dll
+wine64 regsvr32 wineasio.dll
 ```
 
 regsvr32 registers the ASIO COM object in the default prefix `~/.wine`.
