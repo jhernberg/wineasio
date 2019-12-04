@@ -37,7 +37,6 @@
 #include "objbase.h"
 #include "mmsystem.h"
 #include "winreg.h"
-#include "wine/unicode.h"
 
 #define IEEE754_64FLOAT 1
 #undef NATIVE_INT64
@@ -88,6 +87,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(asio);
 
 /* Hide ELF symbols for the COM members - No need to to export them */
 #define HIDDEN __attribute__ ((visibility("hidden")))
+
+/* Function required as unicode.h no longer in Wine from v4.6 */
+WCHAR *strrchrW( const WCHAR *str, WCHAR ch )
+{
+    WCHAR *ret = NULL;
+    do { if (*str == ch) ret = (WCHAR *)(ULONG_PTR)str; } while (*str++);
+    return ret;
+}
 
 /*****************************************************************************
  * IWineAsio interface
