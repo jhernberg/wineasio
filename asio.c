@@ -1011,7 +1011,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
         {
             buffer_info->buffers[0] = &This->input_channel[buffer_info->channelNum].audio_buffer[0];
             buffer_info->buffers[1] = &This->input_channel[buffer_info->channelNum].audio_buffer[This->asio_current_buffersize];
-            This->input_channel[This->asio_active_inputs].active = ASIOTrue;
+            This->input_channel[buffer_info->channelNum].active = ASIOTrue;
             This->asio_active_inputs++;
             /* TRACE("ASIO audio buffer for channel %i as input %li created\n", i, This->asio_active_inputs); */
         }
@@ -1019,7 +1019,7 @@ HIDDEN ASIOError STDMETHODCALLTYPE CreateBuffers(LPWINEASIO iface, ASIOBufferInf
         {
             buffer_info->buffers[0] = &This->output_channel[buffer_info->channelNum].audio_buffer[0];
             buffer_info->buffers[1] = &This->output_channel[buffer_info->channelNum].audio_buffer[This->asio_current_buffersize];
-            This->output_channel[This->asio_active_outputs].active = ASIOTrue;
+            This->output_channel[buffer_info->channelNum].active = ASIOTrue;
             This->asio_active_outputs++;
             /* TRACE("ASIO audio buffer for channel %i as output %li created\n", i, This->asio_active_outputs); */
         }
